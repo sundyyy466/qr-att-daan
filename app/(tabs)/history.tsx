@@ -3,19 +3,55 @@ import { useCallback, useState } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
 
 import { COLORS } from '@/constants/colors';
-import { STUDENT_ID } from '@/constants/students';
-import { getAttendanceHistory, type AttendanceRecord } from '@/lib/database';
+import { useAuth } from '@/lib/auth';
+import {
+  getAttendanceHistory,
+  type AttendanceRecord,
+} from '@/lib/attendance';
+import {
+  getTeacherEventSummary,
+  type TeacherEventSummary,
+} from '@/lib/attendance';
+import { getUserRole } from '@/lib/profiles';
 
 export default function HistoryScreen() {
-  const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const { user } = useAuth();
+
+  const [studentRecords, setStudentRecords] = useState<AttendanceRecord[]>([]);
+  const [teacherEvents, setTeacherEvents] = useState<TeacherEventSummary[]>([]);
+  const [role, setRole] = useState<'student' | 'teacher'>('student');
   const [loading, setLoading] = useState(true);
 
-  const loadHistory = useCallback(() => {
-    getAttendanceHistory(STUDENT_ID).then((rows) => {
-      setRecords(rows);
+  const loadHistory = useCallback(async () => {
+    if (!user) {
       setLoading(false);
-    });
-  }, []);
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const roleFromProfile = await getUserRole(user.id);
+const userRole =
+  roleFromProfile === 'teacher' ? 'teacher' : 'student';
+
+console.log('HISTORY ROLE:', roleFromProfile);
+
+      setRole(userRole);
+
+      if (userRole === 'teacher') {
+        const events = await getTeacherEventSummary(user.id);
+        setTeacherEvents(events);
+      } else {
+        const records = await getAttendanceHistory(user.id);
+        setStudentRecords(records);
+      }
+    } catch (error) {
+      console.error('History loading error:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
 
   useFocusEffect(
     useCallback(() => {
@@ -23,26 +59,66 @@ export default function HistoryScreen() {
     }, [loadHistory])
   );
 
+  if (role === 'teacher') {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Event Attendance</Text>
+
+        {loading ? (
+          <Text style={styles.subtitle}>Loading events...</Text>
+        ) : teacherEvents.length === 0 ? (
+          <Text style={styles.subtitle}>
+            No events yet. Create an event to start recording attendance.
+          </Text>
+        ) : (
+          <FlatList
+            data={teacherEvents}
+            keyExtractor={(item) => item.eventId}
+            contentContainerStyle={styles.list}
+            renderItem={({ item }) => (
+              <View style={styles.card}>
+                <Text style={styles.eventTitle}>{item.title}</Text>
+
+                <Text style={styles.eventMeta}>
+                  Event Code: {item.eventCode}
+                </Text>
+
+                <Text style={styles.attendeeCount}>
+                  {item.attendeeCount}{' '}
+                  {item.attendeeCount === 1 ? 'student' : 'students'} attended
+                </Text>
+              </View>
+            )}
+          />
+        )}
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Attendance History</Text>
 
       {loading ? (
         <Text style={styles.subtitle}>Loading records...</Text>
-      ) : records.length === 0 ? (
+      ) : studentRecords.length === 0 ? (
         <Text style={styles.subtitle}>
           No records yet. Scan a QR code to register your attendance.
         </Text>
       ) : (
         <FlatList
-          data={records}
+          data={studentRecords}
           keyExtractor={(item) => String(item.id)}
           contentContainerStyle={styles.list}
           renderItem={({ item }) => (
             <View style={styles.card}>
               <Text style={styles.eventTitle}>{item.eventTitle}</Text>
+
               <Text style={styles.eventMeta}>{item.eventId}</Text>
-              <Text style={styles.eventMeta}>{formatDate(item.scannedAt)}</Text>
+
+              <Text style={styles.eventMeta}>
+                {formatDate(item.scannedAt)}
+              </Text>
             </View>
           )}
         />
@@ -93,11 +169,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: COLORS.textPrimary,
-    marginBottom: 4,
+    marginBottom: 6,
   },
   eventMeta: {
     fontSize: 13,
     color: COLORS.textSecondary,
     marginTop: 2,
+  },
+  attendeeCount: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.primary,
+    marginTop: 10,
   },
 });

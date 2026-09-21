@@ -1,32 +1,150 @@
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import { useState } from 'react';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { useFocusEffect } from '@react-navigation/native';
+import {
+  CameraView,
+  useCameraPermissions,
+  type BarcodeScanningResult,
+} from 'expo-camera';
+import { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import AppButton from '@/components/AppButton';
 import { COLORS } from '@/constants/colors';
-import { STUDENT_ID } from '@/constants/students';
-import { registerAttendance } from '@/lib/database';
+import { useAuth } from '@/lib/auth';
+import { registerAttendance } from '@/lib/attendance';
+import { getUserRole } from '@/lib/profiles';
 
 export default function ScanScreen() {
   const [permission, requestPermission] = useCameraPermissions();
+  const { user } = useAuth();
+
+  const [role, setRole] = useState<'student' | 'teacher' | null>(null);
+  const [roleLoading, setRoleLoading] = useState(true);
 
   const [scanned, setScanned] = useState(false);
   const [lastData, setLastData] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
-  if (!permission) {
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+
+      if (!user) {
+        setRoleLoading(false);
+
+        return () => {
+          active = false;
+        };
+      }
+
+      setRoleLoading(true);
+
+      getUserRole(user.id).then((role) => {
+        if (!active) return;
+
+        setRole(role ?? 'student');
+        setRoleLoading(false);
+      });
+
+      return () => {
+        active = false;
+      };
+    }, [user])
+  );
+
+  // QR code scanning
+  const handleBarcodeScanned = async (
+    result: BarcodeScanningResult
+  ) => {
+    const data = result.data;
+
+    setScanned(true);
+    setLastData(data);
+    setMessage('Checking QR code...');
+    setSuccess(false);
+
+    try {
+      const studentId = user?.id;
+
+      if (!studentId) {
+        setMessage(
+          'You must be logged in to record attendance.'
+        );
+        setSuccess(false);
+        return;
+      }
+
+      const attendanceResult = await registerAttendance(
+        data,
+        studentId
+      );
+
+      setMessage(attendanceResult.message);
+      setSuccess(attendanceResult.success);
+    } catch (error) {
+      console.error(
+        'Attendance registration error:',
+        error
+      );
+
+      setMessage(
+        'Something went wrong while recording attendance.'
+      );
+      setSuccess(false);
+    }
+  };
+
+  // Scan another QR code
+  const handleScanAgain = () => {
+    setScanned(false);
+    setLastData(null);
+    setMessage(null);
+    setSuccess(false);
+  };
+
+  // Role is still loading
+  if (roleLoading) {
     return (
       <View style={styles.permissionContainer}>
-        <Text style={styles.subtitle}>Loading camera...</Text>
+        <Text style={styles.title}>
+          Checking your account...
+        </Text>
       </View>
     );
   }
 
+  // Only students can use the scanner
+  if (role !== 'student') {
+    return (
+      <View style={styles.permissionContainer}>
+        <Text style={styles.title}>Students Only</Text>
+
+        <Text style={styles.subtitle}>
+          This section is available only to student accounts.
+        </Text>
+      </View>
+    );
+  }
+
+  // Camera permission is still loading
+  if (!permission) {
+    return (
+      <View style={styles.permissionContainer}>
+        <Text style={styles.subtitle}>
+          Loading camera...
+        </Text>
+      </View>
+    );
+  }
+
+  // Camera permission was not granted
   if (!permission.granted) {
     return (
       <View style={styles.permissionContainer}>
-        <Text style={styles.title}>Camera Permission Needed</Text>
+        <Text style={styles.title}>
+          Camera Permission Needed
+        </Text>
 
         <Text style={styles.subtitle}>
           We need access to your camera to scan QR codes.
@@ -41,41 +159,6 @@ export default function ScanScreen() {
       </View>
     );
   }
-
-  const handleBarcodeScanned = async ({
-    data,
-  }: {
-    data: string;
-  }) => {
-    setScanned(true);
-    setLastData(data);
-    setMessage('Checking QR code...');
-    setSuccess(false);
-
-    try {
-      const result = await registerAttendance(
-        data,
-        STUDENT_ID
-      );
-
-      setMessage(result.message);
-      setSuccess(result.success);
-    } catch (error) {
-      console.error('Attendance registration error:', error);
-
-      setMessage(
-        'Something went wrong while recording attendance.'
-      );
-      setSuccess(false);
-    }
-  };
-
-  const handleScanAgain = () => {
-    setScanned(false);
-    setLastData(null);
-    setMessage(null);
-    setSuccess(false);
-  };
 
   return (
     <View style={styles.container}>
@@ -101,7 +184,9 @@ export default function ScanScreen() {
           <Text
             style={[
               styles.scanResult,
-              success ? styles.success : styles.error,
+              success
+                ? styles.success
+                : styles.error,
             ]}
           >
             {message}
@@ -202,4 +287,3 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
 });
-

@@ -2,7 +2,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   Platform,
   Pressable,
@@ -16,14 +17,13 @@ import QRCode from 'react-native-qrcode-svg';
 
 import AppButton from '@/components/AppButton';
 import { COLORS } from '@/constants/colors';
-import { createEvent } from '@/lib/database';
+import { useAuth } from '@/lib/auth';
+import { getUserRole } from '@/lib/profiles';
+import { createEvent } from '@/lib/events';
+import { buildQRPayload } from '@/lib/qr';
 
 function toLocalISO(date: Date) {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `T${pad(date.getHours())}:${pad(date.getMinutes())}:00`
-  );
+  return date.toISOString();
 }
 
 function formatDateTime(date: Date) {
@@ -43,8 +43,14 @@ const QUICK_END_OPTIONS = [
 type EditTarget = 'start' | 'end';
 
 export default function TeacherScreen() {
+    const { user } = useAuth();
+
+  const [role, setRole] = useState<'student' | 'teacher' | null>(null);
+  const [roleLoading, setRoleLoading] = useState(true);
   const [title, setTitle] = useState('');
-  const [eventId, setEventId] = useState('');
+ const [eventId, setEventId] = useState(
+  `EVT-${Date.now()}`
+);
   const [startDate, setStartDate] = useState(() => new Date());
   const [endDate, setEndDate] = useState(
     () => new Date(Date.now() + 60 * 60 * 1000)
@@ -55,6 +61,31 @@ export default function TeacherScreen() {
   const [message, setMessage] = useState<string | null>(null);
 
   const isAndroid = Platform.OS === 'android';
+    useFocusEffect(
+    useCallback(() => {
+      let active = true;
+
+      if (!user) {
+        setRoleLoading(false);
+
+        return () => {
+          active = false;
+        };
+      }
+
+      setRoleLoading(true);
+
+      getUserRole(user.id).then((role) => {
+  if (!active) return;
+
+  setRole(role ?? 'student');
+  setRoleLoading(false);
+});
+      return () => {
+        active = false;
+      };
+    }, [user])
+  );
 
   const openPicker = (target: EditTarget) => {
     setMessage(null);
@@ -116,19 +147,18 @@ const handleCreateEvent = async () => {
   }
 
   try {
-    await createEvent(event);
+    const { error } = await createEvent(event);
 
-    // Generate the QR data after the event is successfully saved
-    const qrPayload = JSON.stringify({
-      v: 1,
-      event: event.eventId,
-      title: event.title,
-      start: event.start,
-      end: event.end,
-    });
+    if (error) {
+      setMessage('Could not save the event. Please try again.');
+      return;
+    }
 
-    setPayload(qrPayload);
-    setMessage('Event saved! QR code generated successfully.');
+    setMessage(
+      'Event saved! Scan the QR with the Scan tab to test it.'
+    );
+
+    setPayload(buildQRPayload(event));
   } catch (error) {
     console.error('Create event error:', error);
 
@@ -137,8 +167,25 @@ const handleCreateEvent = async () => {
     );
   }
 };
+    if (roleLoading) {
+    return (
+      <View style={styles.lockContainer}>
+        <Text style={styles.lockTitle}>Checking your account...</Text>
+      </View>
+    );
+  }
 
-  return (
+  if (role !== 'teacher') {
+    return (
+      <View style={styles.lockContainer}>
+        <Text style={styles.lockTitle}>Teachers Only</Text>
+        <Text style={styles.lockMessage}>
+          This section is available only to teacher accounts.
+        </Text>
+      </View>
+    );
+  }
+return (
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
@@ -249,6 +296,29 @@ function PickerField({ value, icon, onPress }: PickerFieldProps) {
 }
 
 const styles = StyleSheet.create({
+    lockContainer: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+
+  lockTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+    marginTop: 16,
+    textAlign: 'center',
+  },
+
+  lockMessage: {
+    fontSize: 15,
+    lineHeight: 21,
+    color: COLORS.textSecondary,
+    marginTop: 8,
+    textAlign: 'center',
+  },
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
