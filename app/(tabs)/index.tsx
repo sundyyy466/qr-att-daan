@@ -1,13 +1,17 @@
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   Pressable,
   SafeAreaView,
   ScrollView,
+  RefreshControl,
   StyleSheet,
   Text,
   View,
-} from 'react-native';import { useEffect, useState } from 'react';
+} from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { Image } from 'react-native';
 import { useAuth } from '@/lib/auth';
 import { getProfile, getUserRole } from '@/lib/profiles';
 import AppButton from '@/components/AppButton';
@@ -42,21 +46,105 @@ const [teacherStats, setTeacherStats] = useState({
   total: 0,
 });
 
+const [teacherRefreshing, setTeacherRefreshing] = useState(false);
+
+const refreshTeacherDashboard = async () => {
+  if (!user || teacherRefreshing) return;
+
+  setTeacherRefreshing(true);
+
+  try {
+    const [events, attendanceData] = await Promise.all([
+      getTeacherEvents(),
+      getTeacherEventAttendance(user.id),
+    ]);
+
+    const now = Date.now();
+
+    const activeEvents = events.filter((event) => {
+      if (event.status?.toLowerCase() === 'closed') {
+        return false;
+      }
+
+      if (!event.start_time || !event.end_time) {
+        return event.status?.toLowerCase() === 'active';
+      }
+
+      const start = new Date(event.start_time).getTime();
+      const end = new Date(event.end_time).getTime();
+
+      return now >= start && now <= end;
+    });
+
+    const closedEvents = events.filter(
+      (event) =>
+        event.status?.toLowerCase() === 'closed' ||
+        (!!event.end_time &&
+          new Date(event.end_time).getTime() < now)
+    );
+
+    setEventStats({
+      total: events.length,
+      active: activeEvents.length,
+      closed: closedEvents.length,
+    });
+
+    const attendees = attendanceData.flatMap(
+      (event) => event.attendees
+    );
+
+    setTeacherStats({
+      present: attendees.filter(
+        (item) => item.status === 'present'
+      ).length,
+      late: attendees.filter(
+        (item) => item.status === 'late'
+      ).length,
+      total: attendees.length,
+    });
+  } catch (error) {
+    console.error('Failed to refresh teacher dashboard:', error);
+  } finally {
+    setTeacherRefreshing(false);
+  }
+};
+
+
   useEffect(() => {
   let cancelled = false;
 
   async function loadRole() {
+
     if (!user) {
       setUserRole(null);
       return;
     }
 
     try {
-      const role = await getUserRole(user.id);
+  const role = await getUserRole(user.id);
 
-      if (!cancelled) {
-        setUserRole(role ?? 'student');
-      }
+  if (!cancelled) {
+    setUserRole(role ?? 'student');
+
+ 
+if (role === 'teacher') {
+  const savedImage = await AsyncStorage.getItem(
+    `teacher_profile_image_${user.id}`
+  );
+
+  setTeacherAvatarUrl(savedImage);
+} else if (role === 'student') {
+  const savedImage = await AsyncStorage.getItem(
+    `student_profile_image_${user.id}`
+  );
+
+  setStudentAvatarUrl(savedImage);
+} else {
+  setTeacherAvatarUrl(null);
+  setStudentAvatarUrl(null);
+}
+
+  }
     } catch (error) {
       console.error('Failed to load user role:', error);
     }
@@ -69,7 +157,32 @@ const [teacherStats, setTeacherStats] = useState({
   };
 }, [user?.id]);
   const [studentName, setStudentName] = useState('');
+  const [teacherAvatarUrl, setTeacherAvatarUrl] = useState<string | null>(null);
+  const [studentAvatarUrl, setStudentAvatarUrl] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  useFocusEffect(
+  useCallback(() => {
+    let cancelled = false;
+
+    const loadStudentAvatar = async () => {
+      if (!user || userRole !== 'student') return;
+
+      const savedImage = await AsyncStorage.getItem(
+        `student_profile_image_${user.id}`
+      );
+
+      if (!cancelled) {
+        setStudentAvatarUrl(savedImage);
+      }
+    };
+
+    loadStudentAvatar();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, userRole])
+);
   const refreshDashboard = async () => {
   if (!user) return;
 
@@ -227,7 +340,18 @@ if (!cancelled) {
   if (userRole === 'teacher') {
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+
+<ScrollView
+  contentContainerStyle={styles.scrollContent}
+  refreshControl={
+    <RefreshControl
+      refreshing={teacherRefreshing}
+      onRefresh={refreshTeacherDashboard}
+      tintColor="#0D9488"
+      colors={['#0D9488']}
+    />
+  }
+>
         <View style={styles.headerContainer}>
           <Header title="QR Attendance" />
         </View>
@@ -257,8 +381,25 @@ if (!cancelled) {
       justifyContent: 'center',
     }}
   >
-    <Ionicons name="person" size={42} color="#398F89" />
-  </Pressable>
+{(userRole === 'teacher' ? teacherAvatarUrl : studentAvatarUrl) ? (
+  <Image
+    source={{
+      uri: userRole === 'teacher' ? teacherAvatarUrl! : studentAvatarUrl!,
+    }}
+    style={{
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+    }}
+  />
+) : (
+  <Ionicons
+    name="person"
+    size={42}
+    color="#398F89"
+  />
+)}
+ </Pressable>
 
   <View style={{ flex: 1 }}>
     <Text style={{ color: '#e6edf3', fontSize: 15 }}>
@@ -456,6 +597,14 @@ if (!cancelled) {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={refreshDashboard}
+            tintColor="#0D9488"
+            colors={['#0D9488']}
+          />
+        }
       >
         
         
@@ -822,5 +971,10 @@ refreshButton: {
     color: '#667085',
     marginTop: 4,
   },
+  avatarImage: {
+  width: '100%',
+  height: '100%',
+  borderRadius: 28,
+},
 
 });

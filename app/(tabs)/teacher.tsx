@@ -16,12 +16,12 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
   View,
   Alert,
-
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { captureRef } from 'react-native-view-shot';
@@ -153,7 +153,7 @@ if (Platform.OS === 'web') {
     }
 
     await MediaLibrary.saveToLibraryAsync(uri);
-    Alert.alert('Success', 'Na-save na ang QR sa Gallery!');
+    Alert.alert('Success', 'Saved Succesfully');
   } catch (error) {
     console.error('QR download error:', error);
     Alert.alert('Error', 'Dili ma-download ang QR.');
@@ -250,6 +250,44 @@ Alert.alert(
   const [attendanceEvents, setAttendanceEvents] = useState<
   Awaited<ReturnType<typeof getTeacherEventAttendance>>
 >([]);
+
+const [teacherPageRefreshing, setTeacherPageRefreshing] = useState(false);
+
+const refreshTeacherPage = async () => {
+  if (teacherPageRefreshing) return;
+
+  setTeacherPageRefreshing(true);
+
+  try {
+    const events = await getTeacherEvents();
+    const attendanceData = user
+      ? await getTeacherEventAttendance(user.id)
+      : [];
+
+    setExistingEvents(events);
+    setAttendanceEvents(attendanceData);
+
+    if (attendanceData.length > 0) {
+      setSelectedAttendanceEventId((currentId) =>
+        currentId &&
+        attendanceData.some((event) => event.eventId === currentId)
+          ? currentId
+          : attendanceData[0].eventId
+      );
+    } else {
+      setSelectedAttendanceEventId(null);
+    }
+  } catch (error) {
+    console.error('Failed to refresh teacher page:', error);
+    Alert.alert(
+      'Refresh failed',
+      'Could not reload events. Please try again.'
+    );
+  } finally {
+    setTeacherPageRefreshing(false);
+  }
+};
+
 const [attendanceSearch, setAttendanceSearch] = useState('');
 const [selectedAttendanceEventId, setSelectedAttendanceEventId] =
   useState<string | null>(null);
@@ -418,7 +456,12 @@ const { error } = editingEventId
         : 'Event created successfully!'
     );
 
-    setPayload(buildQRPayload(event));
+    setPayload(
+  buildQRPayload({
+    ...event,
+    eventId: event.eventId.trim(),
+  })
+);
     setTimeout(() => {
   formScrollRef.current?.scrollToEnd({ animated: true });
 }, 100);
@@ -466,11 +509,19 @@ const handleDeleteEvent = async (eventId: string) => {
 return (
 
     <ScrollView
-      ref={formScrollRef}
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-    >
+  ref={formScrollRef}
+  style={styles.container}
+  contentContainerStyle={styles.content}
+  keyboardShouldPersistTaps="handled"
+  refreshControl={
+    <RefreshControl
+      refreshing={teacherPageRefreshing}
+      onRefresh={refreshTeacherPage}
+      tintColor={COLORS.primary}
+      colors={[COLORS.primary]}
+    />
+  }
+>
       <Text style={styles.title}>Create Event QR</Text>
       <Text style={styles.subtitle}>
         Fill in the event details, then scan the generated QR with the Scan tab.

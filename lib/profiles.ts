@@ -7,6 +7,7 @@ export type Profile = {
   email: string;
   full_name: string | null;
   role: Role;
+  avatar_url: string | null;
 };
 
 export async function getProfile(
@@ -14,7 +15,7 @@ export async function getProfile(
 ): Promise<Profile | null> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, email, full_name, role')
+.select('id, email, full_name, role, avatar_url')
     .eq('id', userId)
     .maybeSingle();
 
@@ -32,7 +33,11 @@ export async function getProfile(
 
 export async function updateProfile(
   userId: string,
-  updates: { full_name?: string; role?: Role }
+  updates: {
+  full_name?: string;
+  role?: Role;
+  avatar_url?: string | null;
+}
 ): Promise<{ error: string | null }> {
   const { error } = await supabase
     .from('profiles')

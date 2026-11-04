@@ -56,8 +56,9 @@ export async function registerAttendance(
   
   const payload = parsed.payload;
 
-  const foundEvent = await getEventByCode(payload.event);
-
+const foundEvent =
+  (await getEventByCode(payload.event)) ??
+  (await getEventByCode(payload.event.trim()));
   if (!foundEvent) {
     return {
       success: false,

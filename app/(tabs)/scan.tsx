@@ -2,11 +2,11 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect } from '@react-navigation/native';
 import {
+  Camera,
   CameraView,
   useCameraPermissions,
   type BarcodeScanningResult,
 } from 'expo-camera';
-import jsQR from 'jsqr';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useState } from 'react';
 import {
@@ -21,7 +21,6 @@ import {
 import { router } from 'expo-router';
 
 import AppButton from '@/components/AppButton';
-import { COLORS } from '@/constants/colors';
 import { useAuth } from '@/lib/auth';
 import { registerAttendance } from '@/lib/attendance';
 import { getUserRole } from '@/lib/profiles';
@@ -117,6 +116,8 @@ export default function ScanScreen() {
 
 
 
+
+
 const handlePickFromGallery = async () => {
   try {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -134,61 +135,16 @@ const handlePickFromGallery = async () => {
     setMessage('Reading QR code from image...');
     setSuccess(false);
 
-    const response = await fetch(result.assets[0].uri);
-    const imageBlob = await response.blob();
-
-    const imageDataUrl = await new Promise<string>(
-      (resolve, reject) => {
-        const reader = new FileReader();
-
-        reader.onload = () => {
-          if (typeof reader.result === 'string') {
-            resolve(reader.result);
-          } else {
-            reject(new Error('Could not read image.'));
-          }
-        };
-
-        reader.onerror = () => reject(new Error('Could not read image.'));
-        reader.readAsDataURL(imageBlob);
-      }
+    const qrResults = await Camera.scanFromURLAsync(
+      result.assets[0].uri,
+      ['qr']
     );
 
-    const image = new Image();
-
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error('Could not load image.'));
-      image.src = imageDataUrl;
-    });
-
-    const canvas = document.createElement('canvas');
-    canvas.width = image.naturalWidth;
-    canvas.height = image.naturalHeight;
-
-    const context = canvas.getContext('2d');
-
-    if (!context) {
-      throw new Error('Could not process image.');
-    }
-
-    context.drawImage(image, 0, 0);
-
-    const pixels = context.getImageData(
-      0,
-      0,
-      canvas.width,
-      canvas.height
-    );
-
-    const qr = jsQR(
-      pixels.data,
-      pixels.width,
-      pixels.height
-    );
+    const qr = qrResults.find((item) => item.type === 'qr');
 
     if (!qr?.data) {
       setMessage('No QR code found. Please choose a clear QR image.');
+      setScanned(false);
       return;
     }
 
@@ -197,15 +153,15 @@ const handlePickFromGallery = async () => {
     await handleBarcodeScanned({
       type: 'qr',
       data: qr.data,
-      cornerPoints: [],
-      bounds: {
+      cornerPoints: qr.cornerPoints ?? [],
+      bounds: qr.bounds ?? {
         origin: { x: 0, y: 0 },
-        size: { width: canvas.width, height: canvas.height },
+        size: { width: 0, height: 0 },
       },
     });
   } catch (error) {
     console.error('Gallery QR scan error:', error);
-    setScanned(true);
+    setScanned(false);
     setMessage('Could not read this image. Please try another QR image.');
     setSuccess(false);
   }

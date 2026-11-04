@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   StyleSheet,
   Text,
@@ -61,6 +62,18 @@ export default function ProfileScreen() {
 
     setProfile(p);
     setDraftName(p?.full_name ?? '');
+
+    if (p?.role === 'teacher' || p?.role === 'student') {
+      const storageKey =
+        p.role === 'teacher'
+          ? `teacher_profile_image_${user.id}`
+          : `student_profile_image_${user.id}`;
+
+      const savedImage = await AsyncStorage.getItem(storageKey);
+      setAvatarUri(savedImage);
+      setProfilePhoto(savedImage);
+    }
+
   }, [user]);
 
   useFocusEffect(
@@ -127,9 +140,26 @@ export default function ProfileScreen() {
       quality: 0.8,
     });
 
-    if (!result.canceled && result.assets?.[0]?.uri) {
-      setAvatarUri(result.assets[0].uri);
-    }
+ if (!result.canceled && result.assets?.[0]?.uri) {
+  const imageUri = result.assets[0].uri;
+
+  setAvatarUri(imageUri);
+
+  
+   if (
+     user &&
+     (profile?.role === 'teacher' || profile?.role === 'student')
+   ) {
+     const storageKey =
+       profile.role === 'teacher'
+         ? `teacher_profile_image_${user.id}`
+         : `student_profile_image_${user.id}`;
+
+     await AsyncStorage.setItem(storageKey, imageUri);
+     setProfilePhoto(imageUri);
+   }
+
+}
   }}
   accessibilityRole="button"
   accessibilityLabel="Change profile photo"

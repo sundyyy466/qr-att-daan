@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
@@ -30,21 +31,22 @@ export default function HistoryScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const [teacherAttendance, setTeacherAttendance] = useState<
   Awaited<ReturnType<typeof getTeacherEventAttendance>>
 >([]);
 const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 const [studentSearch, setStudentSearch] = useState('');
 
-  const loadHistory = useCallback(async () => {
+  const loadHistory = useCallback(async (isPullToRefresh = false) => {
     if (!user) {
       setRecords([]);
       setLoading(false);
       return;
     }
 
-    setLoading(true);
-    setError('');
+setLoading(!isPullToRefresh);
+setError('');
 
     try {
       const userRole = await getUserRole(user.id);
@@ -69,9 +71,10 @@ const [studentSearch, setStudentSearch] = useState('');
     } catch (err) {
       console.error('Student history loading error:', err);
       setError('Could not load attendance. Please try again.');
-    } finally {
-      setLoading(false);
-    }
+} finally {
+  setLoading(false);
+  setRefreshing(false);
+}
   }, [user]);
 
   useFocusEffect(
@@ -245,6 +248,17 @@ const filteredTeacherStudents = allStudentsForEvent.filter(
 
           <FlatList
             data={filteredTeacherStudents}
+            refreshControl={
+  <RefreshControl
+    refreshing={refreshing}
+    onRefresh={() => {
+      setRefreshing(true);
+      loadHistory(true);
+    }}
+    tintColor={COLORS.primary}
+    colors={[COLORS.primary]}
+  />
+}
             keyExtractor={(item) => item.studentId}
             contentContainerStyle={styles.list}
             renderItem={({ item }) => (
@@ -355,6 +369,17 @@ if (role && role !== 'student') {
           keyExtractor={(item) => item.eventId}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+  <RefreshControl
+    refreshing={refreshing}
+    onRefresh={() => {
+      setRefreshing(true);
+      loadHistory();
+    }}
+    tintColor={COLORS.primary}
+    colors={[COLORS.primary]}
+  />
+}
           renderItem={({ item }) => {
             const badgeStyle =
               item.status === 'present'
